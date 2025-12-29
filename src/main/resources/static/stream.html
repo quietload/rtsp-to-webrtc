@@ -39,7 +39,7 @@
         .input-group label { 
             font-weight: bold; 
             color: #00d4ff; 
-            min-width: 100px; 
+            min-width: 120px; 
         }
         .input-group input, 
         .input-group select { 
@@ -159,12 +159,19 @@
         <div class="input-group">
             <label for="profile">Profile:</label>
             <select id="profile">
-                <option value="">원본 (트랜스코딩 없음)</option>
+                <option value="">원본 (스케일링 없음)</option>
                 <option value="FHD">FHD (1920x1080)</option>
                 <option value="HD">HD (1280x720)</option>
                 <option value="D1">D1 (720x480)</option>
                 <option value="CIF">CIF (352x288)</option>
             </select>
+        </div>
+        <div class="input-group">
+            <label for="transcode">H.265 변환:</label>
+            <div class="checkbox-wrapper">
+                <input type="checkbox" id="transcode">
+                <span>H.265 → H.264 트랜스코딩</span>
+            </div>
         </div>
         <div class="input-group">
             <label for="useStun">STUN 서버:</label>
@@ -200,6 +207,7 @@
         const videoPlayer = document.getElementById('videoPlayer');
         const rtspUrlInput = document.getElementById('rtspUrl');
         const profileSelect = document.getElementById('profile');
+        const transcodeCheckbox = document.getElementById('transcode');
         const useStunCheckbox = document.getElementById('useStun');
         const stunUrlInput = document.getElementById('stunUrl');
         const stunUrlGroup = document.getElementById('stunUrlGroup');
@@ -271,13 +279,19 @@
                 playBtn.disabled = true;
                 stopBtn.disabled = false;
 
-                // WebSocket 연결 (RTSP URL은 쿼리 파라미터로)
+                // WebSocket 연결 URL 생성
                 const wsUrl = new URL(`ws://${location.hostname}:${location.port}/stream`);
                 wsUrl.searchParams.append('url', rtspUrl);
                 
+                // Profile 추가
                 const profile = profileSelect.value;
                 if (profile) {
                     wsUrl.searchParams.append('profile', profile);
+                }
+
+                // Transcode 옵션 추가
+                if (transcodeCheckbox.checked) {
+                    wsUrl.searchParams.append('transcode', 'true');
                 }
 
                 log(`WebSocket 연결: ${wsUrl.toString()}`);
@@ -303,6 +317,7 @@
         async function startWebRTC() {
             const iceServers = getIceServers();
             log(`ICE 서버: ${iceServers.length > 0 ? iceServers[0].urls : '없음 (오프라인 모드)'}`);
+            log(`H.265 트랜스코딩: ${transcodeCheckbox.checked ? '활성화' : '비활성화'}`);
 
             // RTCPeerConnection 생성
             pc = new RTCPeerConnection({ iceServers });

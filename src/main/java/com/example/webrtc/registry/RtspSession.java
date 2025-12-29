@@ -18,6 +18,7 @@ public class RtspSession {
     private WebRtcEndpoint webRtcEndpoint;
     private String rtspUrl;
     private String profile;
+    private boolean transcode;
 
     public RtspSession(WebSocketSession session) {
         this.session = session;
@@ -67,6 +68,14 @@ public class RtspSession {
 
     public void setProfile(String profile) {
         this.profile = profile;
+    }
+
+    public boolean isTranscode() {
+        return transcode;
+    }
+
+    public void setTranscode(boolean transcode) {
+        this.transcode = transcode;
     }
 
     /**

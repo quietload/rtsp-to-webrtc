@@ -32,9 +32,10 @@ import java.util.Map;
  *   <li>JSON 메시지 교환</li>
  *   <li>클라이언트가 Offer, 서버가 Answer</li>
  *   <li>Profile에 따른 해상도 트랜스코딩 지원 (FHD, HD, D1, CIF)</li>
+ *   <li>H.265 → H.264 트랜스코딩 지원</li>
  * </ul>
  * 
- * <p>WebSocket 엔드포인트: /stream?url={rtspUrl}&profile={profile}</p>
+ * <p>WebSocket 엔드포인트: /stream?url={rtspUrl}&profile={profile}&transcode={true|false}</p>
  * 
  * <p>메시지 프로토콜:</p>
  * <pre>
@@ -70,6 +71,9 @@ public class StreamHandler extends TextWebSocketHandler {
     @Value("${stun.server.url:}")
     private String stunServerUrl;
 
+    @Value("${transcode.h265.enabled:false}")
+    private boolean h265TranscodeEnabled;
+
     public StreamHandler(KurentoClient kurentoClient, RtspSessionRegistry registry) {
         this.kurentoClient = kurentoClient;
         this.registry = registry;
@@ -90,6 +94,7 @@ public class StreamHandler extends TextWebSocketHandler {
         
         String rtspUrl = params.get("url");
         String profile = params.get("profile");
+        String transcodeParam = params.get("transcode");
 
         // URL 디코딩
         if (rtspUrl != null) {
@@ -102,12 +107,19 @@ public class StreamHandler extends TextWebSocketHandler {
             return;
         }
 
-        log.info("연결됨 [{}] - RTSP: {}, Profile: {}", session.getId(), rtspUrl, profile);
+        // 트랜스코딩 옵션 (쿼리 파라미터 > 설정 파일)
+        boolean transcode = transcodeParam != null 
+            ? Boolean.parseBoolean(transcodeParam) 
+            : h265TranscodeEnabled;
+
+        log.info("연결됨 [{}] - RTSP: {}, Profile: {}, Transcode: {}", 
+                session.getId(), rtspUrl, profile, transcode);
 
         // 세션 생성 및 등록
         RtspSession rtspSession = new RtspSession(session);
         rtspSession.setRtspUrl(rtspUrl);
         rtspSession.setProfile(profile);
+        rtspSession.setTranscode(transcode);
         registry.register(rtspSession);
     }
 
@@ -143,8 +155,9 @@ public class StreamHandler extends TextWebSocketHandler {
     private void handleStart(WebSocketSession session, RtspSession rtspSession, JsonObject jsonMessage) {
         String rtspUrl = rtspSession.getRtspUrl();
         String profile = rtspSession.getProfile();
+        boolean transcode = rtspSession.isTranscode();
         
-        log.info("스트림 시작 - RTSP: {}, Profile: {}", rtspUrl, profile);
+        log.info("스트림 시작 - RTSP: {}, Profile: {}, Transcode: {}", rtspUrl, profile, transcode);
 
         // 미디어 파이프라인 생성
         MediaPipeline pipeline = kurentoClient.createMediaPipeline();
@@ -164,8 +177,8 @@ public class StreamHandler extends TextWebSocketHandler {
             log.info("STUN 서버 설정: {}", stunServerUrl);
         }
 
-        // 파이프라인 연결 (Profile 적용)
-        connectPipeline(player, webRtcEndpoint, pipeline, profile);
+        // 파이프라인 연결
+        connectPipeline(player, webRtcEndpoint, pipeline, profile, transcode);
 
         // 이벤트 리스너 등록
         registerEventListeners(session, player, webRtcEndpoint);
@@ -194,35 +207,62 @@ public class StreamHandler extends TextWebSocketHandler {
     }
 
     /**
-     * 파이프라인 연결 (Profile에 따라 스케일링 필터 적용)
+     * 파이프라인 연결 (Profile, Transcode 옵션에 따라 필터 적용)
      */
     private void connectPipeline(PlayerEndpoint player, WebRtcEndpoint webRtcEndpoint, 
-                                  MediaPipeline pipeline, String profile) {
+                                  MediaPipeline pipeline, String profile, boolean transcode) {
+        
+        MediaElement lastElement = player;
+
+        // H.265 트랜스코딩 (H.265 → H.264)
+        if (transcode) {
+            // H.265 디코더
+            GStreamerFilter decoder = new GStreamerFilter.Builder(pipeline, "decodebin")
+                    .withFilterType(FilterType.VIDEO)
+                    .build();
+            
+            // H.264 인코더 (저지연 설정)
+            GStreamerFilter encoder = new GStreamerFilter.Builder(pipeline, 
+                    "x264enc tune=zerolatency speed-preset=ultrafast bitrate=2000")
+                    .withFilterType(FilterType.VIDEO)
+                    .build();
+            
+            lastElement.connect(decoder);
+            decoder.connect(encoder);
+            lastElement = encoder;
+            
+            log.info("H.265 → H.264 트랜스코딩 활성화");
+        }
+
+        // Profile에 따른 해상도 스케일링
         if (profile != null && PROFILE_RESOLUTIONS.containsKey(profile.toUpperCase())) {
             int[] resolution = PROFILE_RESOLUTIONS.get(profile.toUpperCase());
             int width = resolution[0];
             int height = resolution[1];
             
-            // GStreamer 스케일링 필터
+            // 비디오 스케일러
             GStreamerFilter scaleFilter = new GStreamerFilter.Builder(pipeline, "videoscale")
                     .withFilterType(FilterType.VIDEO)
                     .build();
             
+            // 해상도 캡스 필터
             String capsCommand = String.format("capsfilter caps=video/x-raw,width=%d,height=%d", width, height);
             GStreamerFilter capsFilter = new GStreamerFilter.Builder(pipeline, capsCommand)
                     .withFilterType(FilterType.VIDEO)
                     .build();
             
-            // Player → Scale → Caps → WebRTC
-            player.connect(scaleFilter);
+            lastElement.connect(scaleFilter);
             scaleFilter.connect(capsFilter);
-            capsFilter.connect(webRtcEndpoint);
+            lastElement = capsFilter;
             
             log.info("Profile {} 적용: {}x{}", profile.toUpperCase(), width, height);
-        } else {
-            // 원본 해상도
-            player.connect(webRtcEndpoint);
-            log.debug("원본 해상도 사용");
+        }
+
+        // 최종 연결: WebRTC 엔드포인트
+        lastElement.connect(webRtcEndpoint);
+        
+        if (!transcode && profile == null) {
+            log.debug("원본 스트림 사용 (트랜스코딩/스케일링 없음)");
         }
     }
 
