@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebRTC Stream Player</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            max-width: 1400px; 
+            margin: 0 auto; 
+            padding: 20px; 
+            background: #1a1a2e; 
+            color: #eee; 
+        }
+        h1 { text-align: center; color: #00d4ff; margin-bottom: 30px; }
+        
+        /* Navigation */
+        .nav { text-align: center; margin-bottom: 20px; }
+        .nav a { color: #00d4ff; margin: 0 15px; text-decoration: none; }
+        .nav a:hover { text-decoration: underline; }
+        
+        /* Input Section */
+        .input-section { 
+            background: #16213e; 
+            padding: 25px; 
+            border-radius: 12px; 
+            margin-bottom: 20px; 
+        }
+        .input-group { 
+            display: flex; 
+            gap: 15px; 
+            align-items: center; 
+            flex-wrap: wrap; 
+            margin-bottom: 15px; 
+        }
+        .input-group:last-child { margin-bottom: 0; }
+        .input-group label { 
+            font-weight: bold; 
+            color: #00d4ff; 
+            min-width: 100px; 
+        }
+        .input-group input, 
+        .input-group select { 
+            flex: 1; 
+            min-width: 300px; 
+            padding: 12px 15px; 
+            font-size: 14px; 
+            border: 2px solid #0f3460; 
+            border-radius: 6px; 
+            background: #0f0f23; 
+            color: #eee; 
+        }
+        .input-group input:focus, 
+        .input-group select:focus { 
+            outline: none; 
+            border-color: #00d4ff; 
+        }
+        .input-group .checkbox-wrapper {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .input-group input[type="checkbox"] {
+            min-width: auto;
+            width: 20px;
+            height: 20px;
+        }
+        
+        /* Status */
+        .status { 
+            text-align: center; 
+            padding: 12px; 
+            border-radius: 6px; 
+            margin: 20px 0; 
+            font-weight: bold; 
+        }
+        .status.connected { background: rgba(0, 212, 100, 0.2); color: #00d464; }
+        .status.disconnected { background: rgba(233, 69, 96, 0.2); color: #e94560; }
+        .status.connecting { background: rgba(255, 193, 7, 0.2); color: #ffc107; }
+        .status.playing { background: rgba(0, 212, 255, 0.2); color: #00d4ff; }
+        
+        /* Controls */
+        .controls { text-align: center; margin: 25px 0; }
+        button { 
+            padding: 12px 35px; 
+            margin: 0 10px; 
+            font-size: 16px; 
+            border: none; 
+            border-radius: 6px; 
+            cursor: pointer; 
+            transition: all 0.3s; 
+        }
+        #playBtn { background: #00d4ff; color: #1a1a2e; }
+        #playBtn:hover { background: #00b8e6; }
+        #stopBtn { background: #e94560; color: white; }
+        #stopBtn:hover { background: #d63050; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        
+        /* Video */
+        .video-section { display: flex; justify-content: center; }
+        .video-container { 
+            background: #16213e; 
+            padding: 20px; 
+            border-radius: 12px; 
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3); 
+        }
+        .video-container h3 { 
+            margin: 0 0 15px 0; 
+            color: #00d4ff; 
+            text-align: center; 
+        }
+        video { 
+            width: 960px; 
+            max-width: 100%; 
+            height: auto; 
+            aspect-ratio: 16/9; 
+            background: #000; 
+            border-radius: 8px; 
+        }
+        
+        /* Log */
+        .log { 
+            background: #0f0f23; 
+            padding: 15px; 
+            border-radius: 8px; 
+            height: 200px; 
+            overflow-y: auto; 
+            font-family: 'Consolas', monospace; 
+            font-size: 12px; 
+            margin-top: 20px; 
+        }
+        .log-entry { 
+            margin: 4px 0; 
+            padding: 3px 0; 
+            border-bottom: 1px solid #222; 
+        }
+        .log-entry.error { color: #e94560; }
+        .log-entry.success { color: #00d464; }
+        .log-entry.info { color: #00d4ff; }
+    </style>
+</head>
+<body>
+    <div class="nav">
+        <a href="index.html">📹 WebRTC 루프백</a>
+        <a href="rtsp.html">📺 RTSP Player</a>
+        <a href="stream.html">🎬 Stream Player</a>
+    </div>
+
+    <h1>🎬 WebRTC Stream Player</h1>
+    
+    <div class="input-section">
+        <div class="input-group">
+            <label for="rtspUrl">RTSP URL:</label>
+            <input type="text" id="rtspUrl" 
+                   placeholder="rtsp://username:password@192.168.1.100:554/stream1">
+        </div>
+        <div class="input-group">
+            <label for="profile">Profile:</label>
+            <select id="profile">
+                <option value="">원본 (트랜스코딩 없음)</option>
+                <option value="FHD">FHD (1920x1080)</option>
+                <option value="HD">HD (1280x720)</option>
+                <option value="D1">D1 (720x480)</option>
+                <option value="CIF">CIF (352x288)</option>
+            </select>
+        </div>
+        <div class="input-group">
+            <label for="useStun">STUN 서버:</label>
+            <div class="checkbox-wrapper">
+                <input type="checkbox" id="useStun">
+                <span>사용 (인터넷 연결 필요)</span>
+            </div>
+        </div>
+        <div class="input-group" id="stunUrlGroup" style="display: none;">
+            <label for="stunUrl">STUN URL:</label>
+            <input type="text" id="stunUrl" value="stun:stun.l.google.com:19302">
+        </div>
+    </div>
+
+    <div id="status" class="status disconnected">연결 안됨</div>
+    
+    <div class="controls">
+        <button id="playBtn" onclick="play()">▶ 재생</button>
+        <button id="stopBtn" onclick="stop()" disabled>⏹ 정지</button>
+    </div>
+
+    <div class="video-section">
+        <div class="video-container">
+            <h3>RTSP → WebRTC 스트림</h3>
+            <video id="videoPlayer" autoplay playsinline muted></video>
+        </div>
+    </div>
+    
+    <div class="log" id="log"></div>
+
+    <script>
+        // DOM Elements
+        const videoPlayer = document.getElementById('videoPlayer');
+        const rtspUrlInput = document.getElementById('rtspUrl');
+        const profileSelect = document.getElementById('profile');
+        const useStunCheckbox = document.getElementById('useStun');
+        const stunUrlInput = document.getElementById('stunUrl');
+        const stunUrlGroup = document.getElementById('stunUrlGroup');
+        const playBtn = document.getElementById('playBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const statusDiv = document.getElementById('status');
+        const logDiv = document.getElementById('log');
+
+        // State
+        let ws = null;
+        let pc = null;
+
+        // STUN 체크박스 토글
+        useStunCheckbox.addEventListener('change', () => {
+            stunUrlGroup.style.display = useStunCheckbox.checked ? 'flex' : 'none';
+        });
+
+        /**
+         * 로그 출력
+         */
+        function log(message, type = 'info') {
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+            console.log(`[${type}] ${message}`);
+        }
+
+        /**
+         * 상태 표시 업데이트
+         */
+        function setStatus(text, type) {
+            statusDiv.textContent = text;
+            statusDiv.className = `status ${type}`;
+        }
+
+        /**
+         * WebSocket 메시지 전송
+         */
+        function sendMessage(message) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify(message));
+            }
+        }
+
+        /**
+         * ICE 서버 설정 생성
+         */
+        function getIceServers() {
+            if (useStunCheckbox.checked && stunUrlInput.value.trim()) {
+                return [{ urls: stunUrlInput.value.trim() }];
+            }
+            return []; // 오프라인 모드
+        }
+
+        /**
+         * 스트림 재생 시작
+         */
+        async function play() {
+            const rtspUrl = rtspUrlInput.value.trim();
+            if (!rtspUrl) {
+                alert('RTSP URL을 입력하세요.');
+                return;
+            }
+
+            try {
+                setStatus('연결 중...', 'connecting');
+                playBtn.disabled = true;
+                stopBtn.disabled = false;
+
+                // WebSocket 연결 (RTSP URL은 쿼리 파라미터로)
+                const wsUrl = new URL(`ws://${location.hostname}:${location.port}/stream`);
+                wsUrl.searchParams.append('url', rtspUrl);
+                
+                const profile = profileSelect.value;
+                if (profile) {
+                    wsUrl.searchParams.append('profile', profile);
+                }
+
+                log(`WebSocket 연결: ${wsUrl.toString()}`);
+                ws = new WebSocket(wsUrl);
+
+                ws.onopen = async () => {
+                    log('WebSocket 연결됨', 'success');
+                    await startWebRTC();
+                };
+
+                ws.onmessage = handleServerMessage;
+                ws.onerror = () => handleError('WebSocket 에러');
+                ws.onclose = handleClose;
+
+            } catch (error) {
+                handleError(error.message);
+            }
+        }
+
+        /**
+         * WebRTC 연결 시작
+         */
+        async function startWebRTC() {
+            const iceServers = getIceServers();
+            log(`ICE 서버: ${iceServers.length > 0 ? iceServers[0].urls : '없음 (오프라인 모드)'}`);
+
+            // RTCPeerConnection 생성
+            pc = new RTCPeerConnection({ iceServers });
+
+            // 수신 전용 트랜시버 추가
+            pc.addTransceiver('video', { direction: 'recvonly' });
+            pc.addTransceiver('audio', { direction: 'recvonly' });
+
+            // 트랙 수신 이벤트
+            pc.ontrack = (event) => {
+                log('미디어 트랙 수신', 'success');
+                if (event.streams && event.streams[0]) {
+                    videoPlayer.srcObject = event.streams[0];
+                }
+            };
+
+            // 연결 상태 변경 이벤트
+            pc.onconnectionstatechange = () => {
+                const state = pc.connectionState;
+                log(`연결 상태: ${state}`);
+                
+                switch (state) {
+                    case 'connected':
+                        setStatus('재생 중', 'playing');
+                        break;
+                    case 'failed':
+                    case 'disconnected':
+                        setStatus('연결 실패', 'disconnected');
+                        break;
+                }
+            };
+
+            // ICE Candidate 이벤트
+            pc.onicecandidate = (event) => {
+                if (event.candidate) {
+                    sendMessage({ 
+                        id: 'onIceCandidate', 
+                        candidate: event.candidate 
+                    });
+                }
+            };
+
+            // ICE 연결 상태 로깅
+            pc.oniceconnectionstatechange = () => {
+                log(`ICE 상태: ${pc.iceConnectionState}`);
+            };
+
+            // SDP Offer 생성 및 전송
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            
+            log('SDP Offer 전송');
+            sendMessage({ 
+                id: 'start', 
+                sdpOffer: offer.sdp 
+            });
+        }
+
+        /**
+         * 서버 메시지 처리
+         */
+        async function handleServerMessage(event) {
+            const message = JSON.parse(event.data);
+            log(`메시지 수신: ${message.id}`);
+
+            switch (message.id) {
+                case 'startResponse':
+                    log('SDP Answer 수신', 'success');
+                    await pc.setRemoteDescription(
+                        new RTCSessionDescription({ 
+                            type: 'answer', 
+                            sdp: message.sdpAnswer 
+                        })
+                    );
+                    break;
+
+                case 'iceCandidate':
+                    if (message.candidate) {
+                        await pc.addIceCandidate(new RTCIceCandidate(message.candidate));
+                    }
+                    break;
+
+                case 'error':
+                    log(`서버 에러: ${message.message}`, 'error');
+                    setStatus('에러 발생', 'disconnected');
+                    break;
+
+                case 'streamEnded':
+                    log('스트림 종료');
+                    stop();
+                    break;
+            }
+        }
+
+        /**
+         * 에러 처리
+         */
+        function handleError(message) {
+            log(message, 'error');
+            setStatus('에러 발생', 'disconnected');
+            cleanup();
+        }
+
+        /**
+         * WebSocket 종료 처리
+         */
+        function handleClose(event) {
+            log(`WebSocket 종료: code=${event.code}`);
+            if (!event.wasClean) {
+                setStatus('연결 끊김', 'disconnected');
+            }
+        }
+
+        /**
+         * 리소스 정리
+         */
+        function cleanup() {
+            if (pc) {
+                pc.close();
+                pc = null;
+            }
+            if (ws) {
+                ws.close(1000, 'Normal closure');
+                ws = null;
+            }
+            videoPlayer.srcObject = null;
+            playBtn.disabled = false;
+            stopBtn.disabled = true;
+        }
+
+        /**
+         * 스트림 정지
+         */
+        function stop() {
+            log('연결 종료...');
+            
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                sendMessage({ id: 'stop' });
+            }
+            
+            cleanup();
+            setStatus('연결 안됨', 'disconnected');
+            log('연결 종료됨');
+        }
+
+        // 페이지 종료 시 정리
+        window.onbeforeunload = () => stop();
+    </script>
+</body>
+</html>

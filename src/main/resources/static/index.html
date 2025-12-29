@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kurento WebRTC Test</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #1a1a2e;
+            color: #eee;
+        }
+        h1 {
+            text-align: center;
+            color: #00d4ff;
+        }
+        .container {
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        .video-container {
+            background: #16213e;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+        .video-container h3 {
+            margin: 0 0 15px 0;
+            color: #00d4ff;
+            text-align: center;
+        }
+        video {
+            width: 480px;
+            height: 360px;
+            background: #000;
+            border-radius: 8px;
+        }
+        .controls {
+            text-align: center;
+            margin: 30px 0;
+        }
+        button {
+            padding: 12px 30px;
+            margin: 0 10px;
+            font-size: 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        #startBtn {
+            background: #00d4ff;
+            color: #1a1a2e;
+        }
+        #startBtn:hover {
+            background: #00b8e6;
+        }
+        #stopBtn {
+            background: #e94560;
+            color: white;
+        }
+        #stopBtn:hover {
+            background: #d63050;
+        }
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .status {
+            text-align: center;
+            padding: 10px;
+            border-radius: 6px;
+            margin: 20px 0;
+        }
+        .status.connected {
+            background: rgba(0, 212, 100, 0.2);
+            color: #00d464;
+        }
+        .status.disconnected {
+            background: rgba(233, 69, 96, 0.2);
+            color: #e94560;
+        }
+        .status.connecting {
+            background: rgba(255, 193, 7, 0.2);
+            color: #ffc107;
+        }
+        .log {
+            background: #0f0f23;
+            padding: 15px;
+            border-radius: 8px;
+            height: 200px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+            margin-top: 20px;
+        }
+        .log-entry {
+            margin: 5px 0;
+            padding: 3px 0;
+            border-bottom: 1px solid #333;
+        }
+        .log-entry.error {
+            color: #e94560;
+        }
+        .log-entry.success {
+            color: #00d464;
+        }
+        .log-entry.info {
+            color: #00d4ff;
+        }
+    </style>
+</head>
+<body>
+    <div class="nav" style="text-align: center; margin-bottom: 20px;">
+        <a href="index.html" style="color: #00d4ff; margin: 0 15px;">📹 WebRTC 루프백 테스트</a>
+        <a href="rtsp.html" style="color: #00d4ff; margin: 0 15px;">📺 RTSP 플레이어</a>
+    </div>
+
+    <h1>🎥 Kurento WebRTC Test</h1>
+    
+    <div id="status" class="status disconnected">연결 안됨</div>
+    
+    <div class="controls">
+        <button id="startBtn" onclick="start()">▶ 시작</button>
+        <button id="stopBtn" onclick="stop()" disabled>⏹ 종료</button>
+    </div>
+    
+    <div class="container">
+        <div class="video-container">
+            <h3>📹 로컬 비디오</h3>
+            <video id="localVideo" autoplay playsinline muted></video>
+        </div>
+        <div class="video-container">
+            <h3>📺 원격 비디오 (루프백)</h3>
+            <video id="remoteVideo" autoplay playsinline></video>
+        </div>
+    </div>
+    
+    <div class="log" id="log"></div>
+
+    <script>
+        const localVideo = document.getElementById('localVideo');
+        const remoteVideo = document.getElementById('remoteVideo');
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const statusDiv = document.getElementById('status');
+        const logDiv = document.getElementById('log');
+
+        let ws;
+        let pc;
+        let localStream;
+
+        const wsUrl = `ws://${window.location.hostname}:${window.location.port}/webrtc`;
+
+        function log(message, type = 'info') {
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+            console.log(message);
+        }
+
+        function setStatus(text, type) {
+            statusDiv.textContent = text;
+            statusDiv.className = `status ${type}`;
+        }
+
+        async function start() {
+            try {
+                setStatus('연결 중...', 'connecting');
+                log('카메라 접근 요청...');
+                
+                // 카메라/마이크 접근
+                localStream = await navigator.mediaDevices.getUserMedia({
+                    video: true,
+                    audio: true
+                });
+                localVideo.srcObject = localStream;
+                log('로컬 미디어 스트림 획득', 'success');
+
+                // WebSocket 연결
+                log(`WebSocket 연결: ${wsUrl}`);
+                ws = new WebSocket(wsUrl);
+
+                ws.onopen = () => {
+                    log('WebSocket 연결됨', 'success');
+                    startWebRtc();
+                };
+
+                ws.onmessage = (event) => {
+                    const message = JSON.parse(event.data);
+                    log(`메시지 수신: ${message.id}`);
+
+                    switch (message.id) {
+                        case 'startResponse':
+                            handleStartResponse(message);
+                            break;
+                        case 'iceCandidate':
+                            handleRemoteIceCandidate(message);
+                            break;
+                        case 'error':
+                            log(`에러: ${message.message}`, 'error');
+                            stop();
+                            break;
+                    }
+                };
+
+                ws.onerror = (error) => {
+                    log(`WebSocket 에러: ${error}`, 'error');
+                    setStatus('연결 에러', 'disconnected');
+                };
+
+                ws.onclose = () => {
+                    log('WebSocket 연결 종료');
+                    setStatus('연결 종료', 'disconnected');
+                };
+
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+
+            } catch (error) {
+                log(`시작 에러: ${error.message}`, 'error');
+                setStatus('에러 발생', 'disconnected');
+            }
+        }
+
+        async function startWebRtc() {
+            log('WebRTC 연결 시작...');
+
+            // RTCPeerConnection 생성
+            pc = new RTCPeerConnection({
+                iceServers: [
+                    { urls: 'stun:stun.l.google.com:19302' }
+                ]
+            });
+
+            // 로컬 트랙 추가
+            localStream.getTracks().forEach(track => {
+                pc.addTrack(track, localStream);
+            });
+
+            // 원격 트랙 수신
+            pc.ontrack = (event) => {
+                log('원격 트랙 수신', 'success');
+                remoteVideo.srcObject = event.streams[0];
+            };
+
+            // ICE 후보 전송
+            pc.onicecandidate = (event) => {
+                if (event.candidate) {
+                    log(`ICE 후보 전송: ${event.candidate.candidate.substring(0, 50)}...`);
+                    sendMessage({
+                        id: 'onIceCandidate',
+                        candidate: event.candidate
+                    });
+                }
+            };
+
+            pc.oniceconnectionstatechange = () => {
+                log(`ICE 연결 상태: ${pc.iceConnectionState}`);
+                if (pc.iceConnectionState === 'connected') {
+                    setStatus('연결됨', 'connected');
+                }
+            };
+
+            // SDP Offer 생성
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            log('SDP Offer 생성 및 전송');
+
+            sendMessage({
+                id: 'start',
+                sdpOffer: offer.sdp
+            });
+        }
+
+        async function handleStartResponse(message) {
+            log('SDP Answer 수신', 'success');
+            await pc.setRemoteDescription(new RTCSessionDescription({
+                type: 'answer',
+                sdp: message.sdpAnswer
+            }));
+        }
+
+        function handleRemoteIceCandidate(message) {
+            const candidate = new RTCIceCandidate(message.candidate);
+            pc.addIceCandidate(candidate);
+            log('원격 ICE 후보 추가');
+        }
+
+        function sendMessage(message) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify(message));
+            }
+        }
+
+        function stop() {
+            log('연결 종료 중...');
+
+            if (ws) {
+                sendMessage({ id: 'stop' });
+                ws.close();
+                ws = null;
+            }
+
+            if (pc) {
+                pc.close();
+                pc = null;
+            }
+
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+                localStream = null;
+            }
+
+            localVideo.srcObject = null;
+            remoteVideo.srcObject = null;
+
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            setStatus('연결 안됨', 'disconnected');
+            log('연결 종료됨');
+        }
+
+        // 페이지 종료 시 정리
+        window.onbeforeunload = () => {
+            stop();
+        };
+    </script>
+</body>
+</html>

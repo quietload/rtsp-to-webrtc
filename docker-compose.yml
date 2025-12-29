@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  kurento:
+    image: kurento/kurento-media-server:latest
+    container_name: kurento-media-server
+    ports:
+      - "8888:8888"
+    environment:
+      - KMS_STUN_IP=stun.l.google.com
+      - KMS_STUN_PORT=19302
+    restart: unless-stopped
+    networks:
+      - webrtc-network
+
+  # 선택사항: TURN 서버 (NAT 환경에서 필요)
+  coturn:
+    image: coturn/coturn:latest
+    container_name: coturn-server
+    ports:
+      - "3478:3478"
+      - "3478:3478/udp"
+      - "5349:5349"
+      - "5349:5349/udp"
+    command: >
+      -n
+      --log-file=stdout
+      --lt-cred-mech
+      --fingerprint
+      --no-multicast-peers
+      --no-cli
+      --no-tlsc
+      --realm=webrtc.local
+      --user=webrtc:webrtc123
+    restart: unless-stopped
+    networks:
+      - webrtc-network
+    profiles:
+      - turn
+
+networks:
+  webrtc-network:
+    driver: bridge

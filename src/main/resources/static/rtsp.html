@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RTSP to WebRTC Player</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #1a1a2e;
+            color: #eee;
+        }
+        h1 {
+            text-align: center;
+            color: #00d4ff;
+            margin-bottom: 30px;
+        }
+        .input-section {
+            background: #16213e;
+            padding: 25px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+        }
+        .input-group {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .input-group label {
+            font-weight: bold;
+            color: #00d4ff;
+            min-width: 100px;
+        }
+        .input-group input {
+            flex: 1;
+            min-width: 300px;
+            padding: 12px 15px;
+            font-size: 14px;
+            border: 2px solid #0f3460;
+            border-radius: 6px;
+            background: #0f0f23;
+            color: #eee;
+        }
+        .input-group input:focus {
+            outline: none;
+            border-color: #00d4ff;
+        }
+        .preset-buttons {
+            margin-top: 15px;
+        }
+        .preset-buttons span {
+            color: #888;
+            margin-right: 10px;
+        }
+        .preset-btn {
+            padding: 6px 12px;
+            margin: 3px;
+            font-size: 12px;
+            background: #0f3460;
+            border: none;
+            border-radius: 4px;
+            color: #eee;
+            cursor: pointer;
+        }
+        .preset-btn:hover {
+            background: #1a4a7a;
+        }
+        .controls {
+            text-align: center;
+            margin: 25px 0;
+        }
+        button {
+            padding: 12px 35px;
+            margin: 0 10px;
+            font-size: 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        #playBtn {
+            background: #00d4ff;
+            color: #1a1a2e;
+        }
+        #playBtn:hover {
+            background: #00b8e6;
+        }
+        #stopBtn {
+            background: #e94560;
+            color: white;
+        }
+        #stopBtn:hover {
+            background: #d63050;
+        }
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .video-section {
+            display: flex;
+            justify-content: center;
+        }
+        .video-container {
+            background: #16213e;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+        .video-container h3 {
+            margin: 0 0 15px 0;
+            color: #00d4ff;
+            text-align: center;
+        }
+        video {
+            width: 960px;
+            max-width: 100%;
+            height: auto;
+            aspect-ratio: 16/9;
+            background: #000;
+            border-radius: 8px;
+        }
+        .status {
+            text-align: center;
+            padding: 12px;
+            border-radius: 6px;
+            margin: 20px 0;
+            font-weight: bold;
+        }
+        .status.connected {
+            background: rgba(0, 212, 100, 0.2);
+            color: #00d464;
+        }
+        .status.disconnected {
+            background: rgba(233, 69, 96, 0.2);
+            color: #e94560;
+        }
+        .status.connecting {
+            background: rgba(255, 193, 7, 0.2);
+            color: #ffc107;
+        }
+        .status.playing {
+            background: rgba(0, 212, 255, 0.2);
+            color: #00d4ff;
+        }
+        .stats {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            margin: 20px 0;
+            flex-wrap: wrap;
+        }
+        .stat-item {
+            background: #16213e;
+            padding: 15px 25px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .stat-item .label {
+            font-size: 12px;
+            color: #888;
+            margin-bottom: 5px;
+        }
+        .stat-item .value {
+            font-size: 18px;
+            font-weight: bold;
+            color: #00d4ff;
+        }
+        .log {
+            background: #0f0f23;
+            padding: 15px;
+            border-radius: 8px;
+            height: 180px;
+            overflow-y: auto;
+            font-family: 'Consolas', monospace;
+            font-size: 12px;
+            margin-top: 20px;
+        }
+        .log-entry {
+            margin: 4px 0;
+            padding: 3px 0;
+            border-bottom: 1px solid #222;
+        }
+        .log-entry.error { color: #e94560; }
+        .log-entry.success { color: #00d464; }
+        .log-entry.info { color: #00d4ff; }
+        .log-entry.warn { color: #ffc107; }
+
+        .nav {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .nav a {
+            color: #00d4ff;
+            margin: 0 15px;
+            text-decoration: none;
+        }
+        .nav a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="nav">
+        <a href="index.html">📹 WebRTC 루프백 테스트</a>
+        <a href="rtsp.html">📺 RTSP 플레이어</a>
+    </div>
+
+    <h1>📺 RTSP to WebRTC Player</h1>
+    
+    <div class="input-section">
+        <div class="input-group">
+            <label for="rtspUrl">RTSP URL:</label>
+            <input type="text" id="rtspUrl" 
+                   placeholder="rtsp://username:password@192.168.1.100:554/stream1"
+                   value="">
+        </div>
+        <div class="preset-buttons">
+            <span>테스트 스트림:</span>
+            <button class="preset-btn" onclick="setPreset('rtsp://wowzaec2demo.streamlock.net/vod/mp4:BigBuckBunny_115k.mp4')">
+                Wowza Demo
+            </button>
+            <button class="preset-btn" onclick="setPreset('rtsp://demo:demo@ipvmdemo.dyndns.org:5541/onvif-media/media.amp?profile=profile_1_h264&sessiontimeout=60&streamtype=unicast')">
+                IPVM Demo
+            </button>
+        </div>
+    </div>
+
+    <div id="status" class="status disconnected">연결 안됨</div>
+    
+    <div class="controls">
+        <button id="playBtn" onclick="play()">▶ 재생</button>
+        <button id="stopBtn" onclick="stop()" disabled>⏹ 정지</button>
+    </div>
+
+    <div class="stats">
+        <div class="stat-item">
+            <div class="label">연결 상태</div>
+            <div class="value" id="connState">-</div>
+        </div>
+        <div class="stat-item">
+            <div class="label">ICE 상태</div>
+            <div class="value" id="iceState">-</div>
+        </div>
+        <div class="stat-item">
+            <div class="label">재생 시간</div>
+            <div class="value" id="playTime">00:00</div>
+        </div>
+    </div>
+
+    <div class="video-section">
+        <div class="video-container">
+            <h3>🎬 RTSP 스트림</h3>
+            <video id="videoPlayer" autoplay playsinline></video>
+        </div>
+    </div>
+    
+    <div class="log" id="log"></div>
+
+    <script>
+        const videoPlayer = document.getElementById('videoPlayer');
+        const rtspUrlInput = document.getElementById('rtspUrl');
+        const playBtn = document.getElementById('playBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const statusDiv = document.getElementById('status');
+        const logDiv = document.getElementById('log');
+        const connStateDiv = document.getElementById('connState');
+        const iceStateDiv = document.getElementById('iceState');
+        const playTimeDiv = document.getElementById('playTime');
+
+        let ws;
+        let pc;
+        let playStartTime;
+        let playTimeInterval;
+
+        const wsUrl = `ws://${window.location.hostname}:${window.location.port}/rtsp`;
+
+        function setPreset(url) {
+            rtspUrlInput.value = url;
+        }
+
+        function log(message, type = 'info') {
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+            console.log(message);
+        }
+
+        function setStatus(text, type) {
+            statusDiv.textContent = text;
+            statusDiv.className = `status ${type}`;
+        }
+
+        function updatePlayTime() {
+            if (playStartTime) {
+                const elapsed = Math.floor((Date.now() - playStartTime) / 1000);
+                const mins = Math.floor(elapsed / 60).toString().padStart(2, '0');
+                const secs = (elapsed % 60).toString().padStart(2, '0');
+                playTimeDiv.textContent = `${mins}:${secs}`;
+            }
+        }
+
+        async function play() {
+            const rtspUrl = rtspUrlInput.value.trim();
+            if (!rtspUrl) {
+                alert('RTSP URL을 입력하세요.');
+                return;
+            }
+
+            try {
+                setStatus('연결 중...', 'connecting');
+                log(`RTSP 스트림 연결: ${rtspUrl}`);
+
+                // WebSocket 연결
+                ws = new WebSocket(wsUrl);
+
+                ws.onopen = () => {
+                    log('WebSocket 연결됨', 'success');
+                    startWebRtc(rtspUrl);
+                };
+
+                ws.onmessage = (event) => {
+                    const message = JSON.parse(event.data);
+                    log(`메시지 수신: ${message.id}`);
+
+                    switch (message.id) {
+                        case 'startResponse':
+                            handleStartResponse(message);
+                            break;
+                        case 'iceCandidate':
+                            handleRemoteIceCandidate(message);
+                            break;
+                        case 'streamEnded':
+                            log('스트림이 종료되었습니다.', 'warn');
+                            setStatus('스트림 종료', 'disconnected');
+                            break;
+                        case 'error':
+                            log(`에러: ${message.message}`, 'error');
+                            setStatus('에러 발생', 'disconnected');
+                            break;
+                    }
+                };
+
+                ws.onerror = (error) => {
+                    log(`WebSocket 에러`, 'error');
+                    setStatus('연결 에러', 'disconnected');
+                };
+
+                ws.onclose = () => {
+                    log('WebSocket 연결 종료');
+                };
+
+                playBtn.disabled = true;
+                stopBtn.disabled = false;
+
+            } catch (error) {
+                log(`재생 에러: ${error.message}`, 'error');
+                setStatus('에러 발생', 'disconnected');
+            }
+        }
+
+        async function startWebRtc(rtspUrl) {
+            log('WebRTC 연결 시작...');
+
+            pc = new RTCPeerConnection({
+                iceServers: [
+                    { urls: 'stun:stun.l.google.com:19302' }
+                ]
+            });
+
+            // 원격 트랙 수신 (RTSP 영상)
+            pc.ontrack = (event) => {
+                log('비디오 트랙 수신', 'success');
+                videoPlayer.srcObject = event.streams[0];
+                setStatus('재생 중', 'playing');
+                
+                // 재생 시간 카운터 시작
+                playStartTime = Date.now();
+                playTimeInterval = setInterval(updatePlayTime, 1000);
+            };
+
+            // ICE 후보 전송
+            pc.onicecandidate = (event) => {
+                if (event.candidate) {
+                    sendMessage({
+                        id: 'onIceCandidate',
+                        candidate: event.candidate
+                    });
+                }
+            };
+
+            pc.onconnectionstatechange = () => {
+                connStateDiv.textContent = pc.connectionState;
+                log(`연결 상태: ${pc.connectionState}`);
+            };
+
+            pc.oniceconnectionstatechange = () => {
+                iceStateDiv.textContent = pc.iceConnectionState;
+                log(`ICE 상태: ${pc.iceConnectionState}`);
+                
+                if (pc.iceConnectionState === 'connected') {
+                    setStatus('연결됨', 'connected');
+                } else if (pc.iceConnectionState === 'failed') {
+                    setStatus('연결 실패', 'disconnected');
+                }
+            };
+
+            // 비디오 수신을 위한 트랜시버 추가
+            pc.addTransceiver('video', { direction: 'recvonly' });
+            pc.addTransceiver('audio', { direction: 'recvonly' });
+
+            // SDP Offer 생성
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            log('SDP Offer 전송');
+
+            sendMessage({
+                id: 'start',
+                rtspUrl: rtspUrl,
+                sdpOffer: offer.sdp
+            });
+        }
+
+        async function handleStartResponse(message) {
+            log('SDP Answer 수신', 'success');
+            await pc.setRemoteDescription(new RTCSessionDescription({
+                type: 'answer',
+                sdp: message.sdpAnswer
+            }));
+        }
+
+        function handleRemoteIceCandidate(message) {
+            if (pc && message.candidate) {
+                const candidate = new RTCIceCandidate(message.candidate);
+                pc.addIceCandidate(candidate);
+            }
+        }
+
+        function sendMessage(message) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify(message));
+            }
+        }
+
+        function stop() {
+            log('재생 정지...');
+
+            if (playTimeInterval) {
+                clearInterval(playTimeInterval);
+                playTimeInterval = null;
+            }
+            playStartTime = null;
+            playTimeDiv.textContent = '00:00';
+
+            if (ws) {
+                sendMessage({ id: 'stop' });
+                ws.close();
+                ws = null;
+            }
+
+            if (pc) {
+                pc.close();
+                pc = null;
+            }
+
+            videoPlayer.srcObject = null;
+            connStateDiv.textContent = '-';
+            iceStateDiv.textContent = '-';
+
+            playBtn.disabled = false;
+            stopBtn.disabled = true;
+            setStatus('연결 안됨', 'disconnected');
+            log('재생 정지됨');
+        }
+
+        window.onbeforeunload = () => {
+            stop();
+        };
+    </script>
+</body>
+</html>
